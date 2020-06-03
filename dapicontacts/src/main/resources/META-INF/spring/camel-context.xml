@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cxf="http://camel.apache.org/schema/cxf" xmlns:ctx="http://www.springframework.org/schema/context" xmlns:jee="http://www.springframework.org/schema/jee" xmlns:osgix="http://www.springframework.org/schema/osgi-compendium" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:act="http://action.trm.services.generic.action.superfinanciera.nexura.sc.com.co/"
+	xmlns:camel="http://camel.apache.org/schema/spring" xmlns:http-conf="http://cxf.apache.org/transports/http/configuration" xmlns:http="http://cxf.apache.org/transports/http/configuration" xmlns:sec="http://cxf.apache.org/configuration/security" xmlns:tem="http://tempuri.org/"
+
+	xsi:schemaLocation="
+        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd
+        http://camel.apache.org/schema/cxf http://camel.apache.org/schema/cxf/camel-cxf.xsd
+        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+        http://www.springframework.org/schema/jee http://www.springframework.org/schema/jee/spring-jee.xsd
+        http://www.springframework.org/schema/osgi-compendium http://www.springframework.org/schema/osgi-compendium/spring-osgi-compendium.xsd
+        	http://cxf.apache.org/configuration/security http://cxf.apache.org/schemas/configuration/security.xsd
+       http://cxf.apache.org/jaxws http://cxf.apache.org/schemas/jaxws.xsd
+       http://cxf.apache.org/transports/http/configuration http://cxf.apache.org/schemas/configuration/http-conf.xsd">
+
+	<import resource="properties-beans.xml" />
+
+	<!-- Enabled Spring Annotations -->
+	<ctx:annotation-config />
+	<ctx:component-scan base-package="com.avianca.pagos.*" />
+
+	<bean class="org.slf4j.LoggerFactory" factory-method="getLogger" id="loggerRef">
+		<constructor-arg index="0" value="dapicontacts" />
+	</bean>
+	<!-- call static method -->
+	<bean id="test" class="org.springframework.beans.factory.config.MethodInvokingFactoryBean">
+		<property name="targetClass" value="org.slf4j.MDC" />
+		<property name="targetMethod" value="put" />
+		<property name="arguments">
+			<list>
+				<value>dapicontacts</value>
+				<value>dapicontacts</value>
+			</list>
+		</property>
+	</bean>
+
+
+	<cxf:rsServer id="restServer" address="${rest.server.url.path}" serviceClass="com.avianca.pagos.rest.service.RestService" staticSubresourceResolution="true">
+		<cxf:providers>
+			<bean class="com.fasterxml.jackson.jaxrs.json.JacksonJsonProvider" />
+		</cxf:providers>
+	</cxf:rsServer>
+	<camel:sslContextParameters id="sslTracking">
+		<camel:keyManagers keyPassword="changeit">
+			<camel:keyStore password="changeit" resource="{{AmadeusCert}}" type="JKS" />
+		</camel:keyManagers>
+		<camel:trustManagers>
+			<camel:keyStore password="changeit" resource="{{AmadeusCert}}" type="JKS" />
+		</camel:trustManagers>
+	</camel:sslContextParameters>
+
+	<bean id="metric" class="org.apache.camel.component.metrics.MetricsComponent">
+		<description>Camel Metrics Component</description>
+	</bean>
+	<!-- Use camel-metrics route policy to gather metrics for all routes -->
+	<bean id="metricsRoutePolicyFactory" class="org.apache.camel.component.metrics.routepolicy.MetricsRoutePolicyFactory">
+		<property name="useJmx" value="true" />
+	</bean>
+	<camelContext id="ctx-dapicontacts" messageHistory="true" trace="false" useMDCLogging="true" typeConverterStatisticsEnabled="true" xmlns="http://camel.apache.org/schema/spring">
+		<propertyPlaceholder location="ref:props" id="propertiesRef" />
+		<endpoint id="rsServerEndpoint" uri="cxfrs://bean://restServer">
+			<property key="bindingStyle" value="SimpleConsumer" />
+			<property key="loggingFeatureEnabled" value="{{rest.server.loggingFeatureEnabled}}" />
+		</endpoint>
+		<endpoint id="sedaCorreoSoporteEndpoint" uri="seda:mailErrorNotification" />
+
+		<onException id="CustomExceptionHandling">
+			<description></description>
+			<exception>java.lang.Exception</exception>
+			<handled>
+				<constant>true</constant>
+			</handled>
+			<log id="logBodyRequest" message="Exception: ${exception.message}, StackTrace:  ${exception.stacktrace}" loggingLevel="ERROR" loggerRef="loggerRef" />
+			<setProperty propertyName="errorMessage">
+				<simple>Exception: ${exception.message}, StackTrace:  ${exception.stacktrace}}</simple>
+			</setProperty>
+			<to pattern="InOnly" uri="ref:sedaCorreoSoporteEndpoint" />
+			<log loggerRef="loggerRef" loggingLevel="ERROR" message="Response error: ${exception.message}" />
+			<setHeader headerName="code">
+				<simple>400</simple>
+			</setHeader>
+			<setHeader headerName="error">
+				<simple>${exception.message}</simple>
+			</setHeader>
+			<bean ref="responseHandler">
+				<description>Create Response Bean</description>
+			</bean>
+		</onException>
+
+		<onException id="CustomExceptionHandling">
+			<description></description>
+			<exception>java.lang.IllegalArgumentException</exception>
+			<handled>
+				<constant>true</constant>
+			</handled>
+			<log id="logBodyRequest" message="Exception: ${exception.message}, StackTrace:  ${exception.stacktrace}" loggingLevel="ERROR" loggerRef="loggerRef" />
+			<setProperty propertyName="errorMessage">
+				<simple>Exception: ${exception.message}, StackTrace:  ${exception.stacktrace}}</simple>
+			</setProperty>
+			<to pattern="InOnly" uri="ref:sedaCorreoSoporteEndpoint" />
+			<log loggerRef="loggerRef" loggingLevel="ERROR" message="Response error: ${exception.message}" />
+			<setHeader headerName="code">
+				<simple>400</simple>
+			</setHeader>
+			<setHeader headerName="error">
+				<simple>${exception.message}</simple>
+			</setHeader>
+			<bean ref="responseHandler">
+				<description>Create Response Bean</description>
+			</bean>
+		</onException>
+
+		<onException id="CustomExceptionHandling">
+			<description></description>
+			<exception>java.io.IOException</exception>
+			<exception>java.net.SocketException</exception>
+			<exception>java.net.UnknownHostException</exception>
+			<handled>
+				<constant>true</constant>
+			</handled>
+			<log id="logBodyRequest" message="Exception: ${exception.message}, StackTrace:  ${exception.stacktrace}" loggingLevel="ERROR" loggerRef="loggerRef" />
+			<setProperty propertyName="errorMessage">
+				<simple>Exception: ${exception.message}, StackTrace:  ${exception.stacktrace}</simple>
+			</setProperty>
+			<to pattern="InOnly" uri="ref:sedaCorreoSoporteEndpoint" />
+			<log loggerRef="loggerRef" loggingLevel="ERROR" message="Response error: ${exception.message}" />
+			<setHeader headerName="code">
+				<simple>408</simple>
+			</setHeader>
+			<setHeader headerName="error">
+				<simple>${exception.message}</simple>
+			</setHeader>
+			<bean ref="responseHandler">
+				<description>Create Response Bean</description>
+			</bean>
+		</onException>
+
+		<route id="restServerRoute" streamCache="true">
+			<from uri="ref:rsServerEndpoint" id="restFrom" />
+			<log message="Peticion recibida con el orderId ${header.orderId} y lastName ${header.lastName}" loggingLevel="INFO" loggerRef="loggerRef" />
+			<setProperty propertyName="url">
+				<simple>{{url.contacts}}</simple>
+			</setProperty>
+			<process ref="getURL" />
+			<setHeader headerName="Authorization">
+				<simple>Bearer ${header.Auth}</simple>
+			</setHeader>
+			<setHeader headerName="CamelHttpMethod">
+				<constant>GET</constant>
+			</setHeader>
+			<setHeader headerName="CamelHttpUri">
+				<simple>${header.url.contacts}</simple>
+			</setHeader>
+			<log message="URL to GET Contact ${header.CamelHttpUri}" loggingLevel="INFO" loggerRef="loggerRef" />
+			<convertBodyTo id="_convertBodyTo1" type="java.lang.String" />
+			<to id="_to3" uri="https4://dummyHttp?throwExceptionOnFailure=false&amp;sslContextParametersRef=sslTracking&amp;httpClient.socketTimeout=60000" />
+			<log message="Response GET Contact Code ${headers.CamelHttpResponseCode}" loggingLevel="INFO" loggerRef="loggerRef" />
+			<log message="Response GET Contact  ${body}" loggingLevel="INFO" loggerRef="loggerRef" />
+			<choice>
+				<when>
+					<simple>${headers.CamelHttpResponseCode} == '200'</simple>
+					<setHeader headerName="code">
+						<constant>200</constant>
+					</setHeader>
+					<convertBodyTo type="java.lang.String" />
+				</when>
+				<otherwise>
+					<setHeader headerName="code">
+						<simple>${headers.CamelHttpResponseCode}</simple>
+					</setHeader>
+				</otherwise>
+			</choice>
+			<bean ref="responseHandler">
+				<description>Create Response Bean</description>
+			</bean>
+		</route>
+
+		<route id="ROUTE-MAIL-NOTIFICATION" customId="true" streamCache="true">
+			<description>Se redirecciona el mensaje al JMS de envío de Emails</description>
+			<from uri="ref:sedaCorreoSoporteEndpoint" />
+			<doTry>
+				<log message="Notificando el Error: ${property.errorMessage}" loggingLevel="INFO" loggerRef="loggerRef" />
+				<setHeader headerName="DescripcionError">
+					<simple>${headers.errorMessage}</simple>
+				</setHeader>
+				<setHeader headerName="NombreServicio" id="NombreServicio">
+					<simple>{{application.service.name}}</simple>
+				</setHeader>
+				<setHeader headerName="TipoServicio" id="TipoServicio">
+					<simple>{{application.service.type}}</simple>
+				</setHeader>
+				<setProperty propertyName="mailTo">
+					<simple>{{email.to}}</simple>
+				</setProperty>
+				<setProperty propertyName="mailFrom">
+					<simple>{{email.from}}</simple>
+				</setProperty>
+				<setProperty propertyName="mailSubject">
+					<simple>{{email.subject}}</simple>
+				</setProperty>
+				<setProperty propertyName="mailTemplate">
+					<constant>{{email.template}}</constant>
+				</setProperty>
+				<process ref="prepareMailingNotificationProcessor">
+					<description>Create request to send to notification queue</description>
+				</process>
+				<log message="Enviando mensaje a la JMS de Notificaciones: ${body}" loggingLevel="INFO" loggerRef="loggerRef" />
+				<inOnly uri="activemq:queue:{{email.notification.queue.name}}" />
+				<doCatch>
+					<exception>java.lang.Exception</exception>
+					<handled>
+						<constant>true</constant>
+					</handled>
+					<log message="Error enviando mensaje al QUEUE: {{email.notification.queue.name}}, MessageError: ${exception.message}" loggingLevel="ERROR" loggerRef="loggerRef" />
+				</doCatch>
+			</doTry>
+		</route>
+	</camelContext>
+
+	<!-- ActiveMQ Configuration -->
+	<bean class="org.apache.activemq.ActiveMQConnectionFactory" id="jmsConnectionFactory" depends-on="props">
+		<property name="brokerURL" value="${AMQ.brokerURL}" />
+		<property name="userName" value="${AMQ.userName}" />
+		<property name="password" value="${AMQ.password}" />
+	</bean>
+	<bean class="org.apache.activemq.pool.PooledConnectionFactory" destroy-method="stop" id="pooledConnectionFactory" init-method="start">
+		<property name="maxConnections" value="10" />
+		<property name="maximumActiveSessionPerConnection" value="100" />
+		<property name="blockIfSessionPoolIsFull" value="false" />
+		<property name="blockIfSessionPoolIsFullTimeout" value="10000" />
+		<property name="connectionFactory" ref="jmsConnectionFactory" />
+	</bean>
+	<bean class="org.apache.camel.component.jms.JmsConfiguration" id="jmsConfiguration">
+		<property name="connectionFactory" ref="pooledConnectionFactory" />
+	</bean>
+	<bean id="activemq" class="org.apache.activemq.camel.component.ActiveMQComponent">
+		<property name="Configuration" ref="jmsConfiguration" />
+	</bean>
+	<!-- End ActiveMQ Configuration -->
+
+</beans>
